@@ -16,8 +16,10 @@ app.add_middleware(
 )
 
 STANDARD_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: ezragoswami@gmail.com) Educational Research Project",
+    "Accept-Encoding": "gzip",  
 }
+
 
 # Helper function to encode URLs to Base64 (so links match our system format)
 def encode_url(url: str) -> str:
