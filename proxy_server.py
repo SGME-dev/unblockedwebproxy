@@ -99,25 +99,47 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=port)
 
 @app.get("/search_proxy")
-async def search_proxy_endpoint(
-    base_site: str = Query(..., description="The base website domain"),
-    q: str = Query(None, description="The search query text parameter")
-):
+async def search_proxy_endpoint(request: Request):
     """
-    Catches raw browser search bar inputs, formats them into a clean absolute link,
-    encrypts them to Base64, and redirects safely back into our main proxy routine loop.
+    Automatically reads the browser's hidden history headers to find out what 
+    website the user was searching on, compiles the text query parameters, 
+    and issues an encrypted Base64 loopback redirect.
     """
-    if not q:
-        # If the search field was blank, just drop back to the main homepage
+    # 1. Grab all raw query arguments submitted by the search form (e.g., 'q=godot')
+    raw_query_string = request.url.query
+    
+    # 2. Extract the parent website domain path using the incoming request headers
+    referer_header = request.headers.get("referer", "")
+    
+    # Defaults fallback if the browser blocks history headers
+    base_site = "https://yewtu.be" 
+    
+    if "url=" in referer_header:
+        try:
+            # Extract the active Base64 hash from the proxy path history block
+            encoded_parent = referer_header.split("url=")[1].split("&")[0]
+            padded_parent = encoded_parent + "=" * ((4 - len(encoded_parent) % 4) % 4)
+            decoded_parent = base64.urlsafe_b64decode(padded_parent).decode("utf-8")
+            
+            # Extract just the main base domain (e.g., https://yewtu.be)
+            domain_match = re.match(r"(https?://[^/]+)", decoded_parent)
+            if domain_match:
+                base_site = domain_match.group(1)
+        except Exception:
+            pass # Fall back to Yewtube if decoding fails
+
+    # 3. Assemble the clear destination string layout
+    if not raw_query_string:
         target_search_url = base_site
     else:
-        # Standard query assembly (e.g., https://yewtu.be)
-        target_search_url = f"{base_site}/search?q={q.replace(' ', '+')}"
+        target_search_url = f"{base_site}/search?{raw_query_string}"
     
-    # Encrypt the compiled destination string into our Base64 string format
+    print(f"[SEARCH ENGINE] Processing query route target: {target_search_url}")
+
+    # 4. Scramble the compiled link path string into Base64 format
     encrypted_target = encode_url(target_search_url)
     
-    # Issue an automated redirect response back to our main /proxy layout route
+    # 5. Return an automated status code 307 temporary redirect to pass back to the main routine loop
     return Response(
         status_code=307, 
         headers={"Location": f"/proxy?url={encrypted_target}"}
