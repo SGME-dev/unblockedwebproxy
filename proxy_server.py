@@ -45,38 +45,47 @@ async def proxy_endpoint(url: str = Query(..., description="The BASE64 ENCODED t
             response = await client.get(real_url, headers=STANDARD_HEADERS, timeout=10.0)
             content_type = response.headers.get("content-type", "")
             
-            # 2. THE REWRITER ENGINE FOR WEBPAGES
+            # UPDATE THE HTML PARSING PASS IN YOUR proxy_server.py:
+
             if "text/html" in content_type:
                 html_content = response.text
                 
-                # Determine the base domain to resolve relative paths (e.g., https://example.com)
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
-                # Regex pattern to find all standard href and src links
-                # Matches patterns like href="https://site.com" or src="/image.png"
-                pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
+                # 1. REWRITE FORMS: Intercept any <form action="..."> lines
+                # This catches the search bars and sends them back to our /search_proxy endpoint
+                form_pattern = r'action=["\'](/[^"\']+|https?://[^"\']+)["\']'
+                
+                def replace_form(match):
+                    original_action = match.group(1)
+                    if original_action.startswith("/"):
+                        full_action = base_domain + original_action
+                    else:
+                        full_action = original_action
+                    
+                    # We pass the base domain inside a hidden helper parameter so the server knows where to search
+                    return f'action="/search_proxy?base_site={base_domain}"'
 
+                html_content = re.sub(form_pattern, replace_form, html_content)
+
+                # 2. STANDARD LINKS (Our existing link rewriter logic continues below)
+                pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 def replace_link(match):
-                    attribute = match.group(1)  # 'href' or 'src'
+                    attribute = match.group(1)
                     original_link = match.group(2)
                     
-                    # Convert relative links (like /style.css) into full absolute links
                     if original_link.startswith("/"):
                         full_link = base_domain + original_link
                     else:
                         full_link = original_link
                     
-                    # Encrypt the link using our client routine format
                     encrypted_link = encode_url(full_link)
-                    
-                    # Return the rewritten attribute pointing directly back to our server
-                    # Render will dynamically fill in the correct domain hosting your app
                     return f'{attribute}="/proxy?url={encrypted_link}"'
 
-                # Execute the comprehensive page rewrite pass
                 modified_html = re.sub(pattern, replace_link, html_content)
                 return Response(content=modified_html, media_type="text/html")
+
             
             # 3. For images/videos/scripts, pass them back directly
             return Response(content=response.content, media_type=content_type)
@@ -88,3 +97,29 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+@app.get("/search_proxy")
+async def search_proxy_endpoint(
+    base_site: str = Query(..., description="The base website domain"),
+    q: str = Query(None, description="The search query text parameter")
+):
+    """
+    Catches raw browser search bar inputs, formats them into a clean absolute link,
+    encrypts them to Base64, and redirects safely back into our main proxy routine loop.
+    """
+    if not q:
+        # If the search field was blank, just drop back to the main homepage
+        target_search_url = base_site
+    else:
+        # Standard query assembly (e.g., https://yewtu.be)
+        target_search_url = f"{base_site}/search?q={q.replace(' ', '+')}"
+    
+    # Encrypt the compiled destination string into our Base64 string format
+    encrypted_target = encode_url(target_search_url)
+    
+    # Issue an automated redirect response back to our main /proxy layout route
+    return Response(
+        status_code=307, 
+        headers={"Location": f"/proxy?url={encrypted_target}"}
+    )
+
