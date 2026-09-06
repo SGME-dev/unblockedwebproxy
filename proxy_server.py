@@ -17,8 +17,8 @@ app.add_middleware(
 )
 
 STANDARD_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "*/*",
+    "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: your_email@example.com) Educational Research Project",
+    "Accept-Encoding": "gzip",
 }
 
 def encode_url(url: str) -> str:
