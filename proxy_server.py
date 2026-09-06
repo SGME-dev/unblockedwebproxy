@@ -25,65 +25,28 @@ def encode_url(url: str) -> str:
     base64_bytes = base64.urlsafe_b64encode(url_bytes)
     return base64_bytes.decode("utf-8").replace("=", "")
 
-@app.get("/search_proxy")
-async def search_proxy_endpoint(request: Request):
-    """
-    Safely captures browser search bar inputs, tracks the parent site domain,
-    and automatically bundles them into an encrypted Base64 loopback redirect.
-    """
-    raw_query_string = request.url.query
-    referer_header = request.headers.get("referer", "")
-    
-    # Default fallback website
-    base_site = "https://yewtu.be" 
-    
-    print(f"[SEARCH DEBUG] Raw incoming search query parameters: {raw_query_string}")
-    print(f"[SEARCH DEBUG] Incoming referer history header path: {referer_header}")
-    
-    if "url=" in referer_header:
-        try:
-            # Cleanly isolate the active Base64 hash parameter from the tracking string
-            parts = referer_header.split("url=")
-            if len(parts) > 1:
-                hash_part = parts[1].split("&")[0]
-                # Re-apply correct string bit padding so Base64 doesn't throw a parsing error
-                padded_hash = hash_part + "=" * ((4 - len(hash_part) % 4) % 4)
-                decoded_parent = base64.urlsafe_b64decode(padded_hash).decode("utf-8")
-                
-                # Extract the pure base website domain string
-                domain_match = re.match(r"(https?://[^/]+)", decoded_parent)
-                if domain_match:
-                    base_site = domain_match.group(1)
-                    print(f"[SEARCH DEBUG] Successfully traced parent context domain: {base_site}")
-        except Exception as e:
-            print(f"[SEARCH ERROR] Internal tracking algorithm failed: {e}")
-
-    # Build the target redirect URL
-    if not raw_query_string:
-        target_search_url = base_site
-    else:
-        target_search_url = f"{base_site}/search?{raw_query_string}"
-    
-    print(f"[SEARCH SUCCESS] Assembled absolute search target: {target_search_url}")
-
-    # Convert the full path to a safe hash string
-    encrypted_target = encode_url(target_search_url)
-    
-    # Issue a clean status 307 temporary redirect to pass back to the main loop function
-    return Response(
-        status_code=307, 
-        headers={"Location": f"/proxy?url={encrypted_target}"}
-    )
-
 @app.get("/proxy")
-async def proxy_endpoint(url: str = Query(..., description="The BASE64 ENCODED target URL")):
+async def proxy_endpoint(request: Request, url: str = Query(..., description="The BASE64 ENCODED target URL")):
+    # 1. DECODE THE MAIN TARGET TARGET
     try:
         padded_url = url + "=" * ((4 - len(url) % 4) % 4)
         decoded_bytes = base64.urlsafe_b64decode(padded_url)
         real_url = decoded_bytes.decode("utf-8")
-        print(f"[PROXY SERVER] Fetching destination: {real_url}")
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
+
+    # 2. CATCH SUBMITTED FORM PARAMETERS
+    # If a form was submitted, its variables will arrive as extra URL arguments (like ?q=godot)
+    raw_query_params = request.url.query
+    if raw_query_params:
+        # Strip away our internal proxy tracking parameter so it doesn't get forwarded to the target website
+        clean_params = "&".join([p for p in raw_query_params.split("&") if not p.startswith("url=")])
+        if clean_params:
+            # Inject the parameters directly into the target destination URL path!
+            separator = "&" if "?" in real_url else "?"
+            real_url = f"{real_url}{separator}{clean_params}"
+
+    print(f"[PROXY SERVER] Active routed target destination: {real_url}")
 
     if not real_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid target link protocol.")
@@ -99,11 +62,31 @@ async def proxy_endpoint(url: str = Query(..., description="The BASE64 ENCODED t
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
-                # 1. INTERCEPT FORMS (Fixes search inputs)
-                form_pattern = r'action=["\'](/[^"\']+|https?://[^"\']+)["\']'
-                html_content = re.sub(form_pattern, 'action="/search_proxy"', html_content)
+                # 3. INTERCEPT ALL FORMS DYNAMICALLY
+                # Looks for any form action attribute (e.g., action="/login" or action="https://site.com")
+                form_pattern = r'<form\b([^>]*)action=["\']([^"\']+)["\']([^>]*)>'
+                
+                def replace_form(match):
+                    before_action = match.group(1)
+                    original_action = match.group(2)
+                    after_action = match.group(3)
+                    
+                    # Convert to full absolute address paths
+                    if original_action.startswith("/"):
+                        full_action = base_domain + original_action
+                    else:
+                        full_action = original_action
+                    
+                    # Encrypt the form action target domain path
+                    encrypted_action = encode_url(full_action)
+                    
+                    # Force the form to submit to our server path, keeping its internal parameters
+                    # We inject a hidden target parameter mapping so it catches on next reload pass
+                    return f'<form{before_action}action="/proxy" {after_action}><input type="hidden" name="url" value="{encrypted_action}">'
 
-                # 2. INTERCEPT HYPERLINKS & IMAGES
+                html_content = re.sub(form_pattern, replace_form, html_content)
+
+                # 4. INTERCEPT HYPERLINKS & ASSETS
                 pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 def replace_link(match):
                     attribute = match.group(1)
