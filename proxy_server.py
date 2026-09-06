@@ -16,9 +16,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STANDARD_HEADERS = {
-    "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: your_email@example.com) Educational Research Project",
+# 🕵️ DYNAMIC HEADER SELECTIONS
+# Wikipedia demands an honest bot name + contact email
+WIKIPEDIA_HEADERS = {
+    "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: ezragoswami@gmail.com) Educational Research Project",
     "Accept-Encoding": "gzip",
+}
+
+# YouTube demands mobile Apple headers to bypass heavy scraping firewalls
+YOUTUBE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.5",
+    "X-YouTube-Client-Name": "5",  
+    "X-YouTube-Client-Version": "17.07.2",
+}
+
+# Fallback headers for standard websites (like Minecraft.net)
+GENERIC_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "*/*",
 }
 
 def encode_url(url: str) -> str:
@@ -26,52 +43,48 @@ def encode_url(url: str) -> str:
     base64_bytes = base64.urlsafe_b64encode(url_bytes)
     return base64_bytes.decode("utf-8").replace("=", "")
 
-# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR
+# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR (Catches relative scripts/form actions)
 class GlobalProxyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
-        # If the browser successfully routes to our active endpoints, let it pass normally
+        # Allow native routing targets to skip interception logic loops
         if path in ["/proxy", "/docs", "/openapi.json"] or path.startswith("/static"):
             return await call_next(request)
             
-        # 🕵️ CATCH ALL UNHANDLED ROUTE TRAFFIC (Like YouTube's /results)
+        # Catch unexpected route configurations (like YouTube's /results)
         referer = request.headers.get("referer", "")
         
         if "url=" in referer:
             try:
-                # Isolate the Base64 hash parameter from your history context
+                # Safely slice and isolate the active Base64 link data hash block
                 hash_part = referer.split("url=")[1].split("&")[0]
                 padded_hash = hash_part + "=" * ((4 - len(hash_part) % 4) % 4)
                 decoded_parent = base64.urlsafe_b64decode(padded_hash).decode("utf-8")
                 
-                # Extract the base target root server domain (e.g., https://www.youtube.com)
+                # Reconstruct the absolute target destination address domain path
                 domain_match = re.match(r"(https?://[^/]+)", decoded_parent)
                 if domain_match:
                     base_site = domain_match.group(1)
                     
-                    # Reconstruct the absolute target destination YouTube path
                     raw_query = request.url.query
                     full_target_url = f"{base_site}{path}"
                     if raw_query:
                         full_target_url += f"?{raw_query}"
                         
-                    print(f"[MIDDLEWARE REDIRECT] Intercepted raw request! Fixing path to: {full_target_url}")
+                    print(f"[MIDDLEWARE REDIRECT] Fixing relative route to absolute: {full_target_url}")
                     
-                    # Encrypt the compiled destination string layout into a safe proxy URL
+                    # Wrap and return a safe Base64 loopback redirection
                     encrypted_target = encode_url(full_target_url)
-                    
-                    # Issue a clear Temporary Redirect (Status 307) to keep parameters safe
                     return Response(
                         status_code=307,
                         headers={"Location": f"/proxy?url={encrypted_target}"}
                     )
             except Exception as e:
-                print(f"[MIDDLEWARE ERROR] Global routing adjustment pass failed: {e}")
+                print(f"[MIDDLEWARE ERROR] Global routing loop calculations crashed: {e}")
                 
         return await call_next(request)
 
-# Register our global interceptor middleware
 app.add_middleware(GlobalProxyMiddleware)
 
 @app.get("/proxy")
@@ -83,22 +96,30 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    print(f"[PROXY ENGINE] Fetching active stream target: {real_url}")
+    # Apply smart heading conditions based on what website name is inside the string link
+    active_headers = GENERIC_HEADERS
+    if "wikipedia.org" in real_url:
+        active_headers = WIKIPEDIA_HEADERS
+        print(f"[PROXY ENGINE] Applying verified Wikipedia bot profile to fetch: {real_url}")
+    elif "youtube.com" in real_url or "youtu.be" in real_url:
+        active_headers = YOUTUBE_HEADERS
+        print(f"[PROXY ENGINE] Applying iOS streaming spoof profile to fetch: {real_url}")
+    else:
+        print(f"[PROXY ENGINE] Fetching standard domain target: {real_url}")
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
-            # Mirror any background API arguments sent directly by web player components
-            response = await client.get(real_url, headers=STANDARD_HEADERS, timeout=15.0)
+            response = await client.get(real_url, headers=active_headers, timeout=15.0)
             content_type = response.headers.get("content-type", "")
             
-            # Rewrite paths on text-based web layouts
+            # Rewrite paths on matching code content blocks
             if "text/html" in content_type or "application/javascript" in content_type:
                 html_content = response.text
                 
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
-                # Intercept links and resource elements dynamically
+                # Intercept links, media locations, and static script modules
                 pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 def replace_link(match):
                     attribute = match.group(1)
@@ -115,7 +136,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 modified_content = re.sub(pattern, replace_link, html_content)
                 return Response(content=modified_content, media_type=content_type)
             
-            # Pipe images, media, or data streams directly back
+            # Pipe straight images or raw audio/video buffers back to browser view frames
             return Response(content=response.content, media_type=content_type)
             
         except httpx.RequestError as exc:
@@ -125,3 +146,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
