@@ -98,7 +98,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
 
-@app.get("/search_proxy")
+@app.get("/search_proxy?q")
 async def search_proxy_endpoint(request: Request):
     """
     Automatically reads the browser's hidden history headers to find out what 
