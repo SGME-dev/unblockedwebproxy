@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
 import re
 import base64
@@ -16,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Unified standard tracking headers for all websites
+# Clean, unified tracking headers honoring Wikipedia bot rules
 MASTER_HEADERS = {
     "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: ezragoswami@gmail.com) Educational Research Project",
     "Accept-Encoding": "gzip",
@@ -28,134 +27,38 @@ def encode_url(url: str) -> str:
     base64_bytes = base64.urlsafe_b64encode(url_bytes)
     return base64_bytes.decode("utf-8").replace("=", "")
 
-# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR
-class GlobalProxyMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-        
-        if path in ["/proxy", "/docs", "/openapi.json"] or path.startswith("/static"):
-            return await call_next(request)
-            
-        referer = request.headers.get("referer", "")
-        
-        if "url=" in referer:
-            try:
-                # Safely isolate the active Base64 hash parameter from the history context string
-                hash_part = referer.split("url=")[1].split("&")[0]
-                padded_hash = hash_part + "=" * ((4 - len(hash_part) % 4) % 4)
-                decoded_parent = base64.urlsafe_b64decode(padded_hash).decode("utf-8")
-                
-                domain_match = re.match(r"(https?://[^/]+)", decoded_parent)
-                if domain_match:
-                    base_site = domain_match.group(1)
-                    
-                    if not path.startswith("/"):
-                        path = "/" + path
-                    
-                    raw_query = request.url.query
-                    full_target_url = f"{base_site}{path}"
-                    if raw_query:
-                        full_target_url += f"?{raw_query}"
-                        
-                    print(f"[MIDDLEWARE REDIRECT] Fixing relative route: {full_target_url}")
-                    
-                    encrypted_target = encode_url(full_target_url)
-                    return Response(
-                        status_code=307,
-                        headers={"Location": f"/proxy?url={encrypted_target}"}
-                    )
-            except Exception as e:
-                print(f"[MIDDLEWARE ERROR] Global routing adjustment failed: {e}")
-                
-        return await call_next(request)
-
-app.add_middleware(GlobalProxyMiddleware)
-
-# 🛠️ JAVASCRIPT INJECTION PAYLOAD
-JS_INJECTION = """
-<script>
-(function() {
-    console.log("[PROXY CLIENT] Intercepting background script requests...");
-
-    function encodeUrl(url) {
-        try {
-            var absoluteUrl = new URL(url, window.location.href).href;
-            var b64 = btoa(unescape(encodeURIComponent(absoluteUrl)));
-            return b64.replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
-        } catch(e) { return url; }
-    }
-
-    // Intercept JavaScript fetch() APIs safely
-    const originalFetch = window.fetch;
-    window.fetch = async function(...args) {
-        if (args && args.length > 0 && typeof args[0] === 'string') {
-            if (!args[0].includes('/proxy') && !args[0].startsWith('data:')) {
-                args[0] = '/proxy?url=' + encodeUrl(args[0]);
-            }
-        }
-        return originalFetch.apply(this, args);
-    };
-
-    // Intercept JavaScript XMLHttpRequest APIs safely
-    const originalOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url, ...args) {
-        if (typeof url === 'string' && !url.includes('/proxy') && !url.startsWith('data:')) {
-            url = '/proxy?url=' + encodeUrl(url);
-        }
-        return originalOpen.apply(this, [method, url, ...args]);
-    };
-})();
-</script>
-"""
-
 @app.get("/proxy")
 async def proxy_endpoint(request: Request, url: str = Query(..., description="The BASE64 ENCODED target URL")):
     try:
+        # Decode the Base64 parameter back to a normal URL string
         padded_url = url + "=" * ((4 - len(url) % 4) % 4)
         decoded_bytes = base64.urlsafe_b64decode(padded_url)
         real_url = decoded_bytes.decode("utf-8")
+        print(f"[PROXY ENGINE] Fetching target website: {real_url}")
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
-
-    # 🛠️ FIX: Safe array string splitting index selections for YouTube transformations
-    if "://youtube.com" in real_url or "youtu.be/" in real_url:
-        extracted_id = ""
-        try:
-            if "watch?v=" in real_url:
-                extracted_id = real_url.split("watch?v=")[1].split("&")[0]
-            elif "youtu.be/" in real_url:
-                extracted_id = real_url.split("youtu.be/")[1].split("?")[0]
-            
-            if extracted_id.strip() != "":
-                real_url = f"https://youtube.com{extracted_id}"
-                print(f"[VIDEO ENGINE] Auto-forwarded video link to Embed Player: {real_url}")
-        except Exception as e:
-            print(f"[VIDEO ENGINE ERROR] Failed parsing video string: {e}")
-
-    print(f"[PROXY ENGINE] Fetching target: {real_url}")
 
     if not real_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid target link protocol.")
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
+            # Download the site files through our master credentials
             response = await client.get(real_url, headers=MASTER_HEADERS, timeout=15.0)
             content_type = response.headers.get("content-type", "")
             
+            # Rewrite paths on matching code content blocks
             if "text/html" in content_type:
                 html_content = response.text
                 
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
-                # Inject our custom JS script right inside the page header
-                html_content = re.sub(r"<head>", f"<head>{JS_INJECTION}", html_content, flags=re.IGNORECASE)
-
-                # LINK REWRITING ENGINE
+                # Intercept links and resource references natively
                 pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 
                 def replace_link(match):
-                    attribute = match.group(1)
+                    attribute = match.group(1) # 'href' or 'src'
                     original_link = match.group(2)
                     
                     if original_link.startswith("/"):
@@ -169,6 +72,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 modified_content = re.sub(pattern, replace_link, html_content)
                 return Response(content=modified_content, media_type=content_type)
             
+            # Directly stream back raw image buffers or audio files
             return Response(content=response.content, media_type=content_type)
             
         except httpx.RequestError as exc:
