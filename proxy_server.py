@@ -110,9 +110,23 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
         padded_url = url + "=" * ((4 - len(url) % 4) % 4)
         decoded_bytes = base64.urlsafe_b64decode(padded_url)
         real_url = decoded_bytes.decode("utf-8")
-        print(f"[PROXY ENGINE] Fetching target: {real_url}")
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
+
+    # 🔄 ADDED YOUTUBE VIDEO LINK REDIRECTION FILTER
+    # Automatically forces regular watch pages into Google's lightweight embed system
+    if "://youtube.com" in real_url or "youtu.be/" in real_url:
+        video_id = ""
+        if "watch?v=" in real_url:
+            video_id = real_url.split("watch?v=")[1].split("&")[0]
+        elif "youtu.be/" in real_url:
+            video_id = real_url.split("youtu.be/")[1].split("?")[0]
+            
+        if video_id:
+            real_url = f"https://youtube.com{video_id}"
+            print(f"[VIDEO ENGINE] Auto-forwarded video link to Embed Player: {real_url}")
+
+    print(f"[PROXY ENGINE] Fetching target: {real_url}")
 
     if not real_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid target link protocol.")
