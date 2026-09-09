@@ -15,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Clean, unified tracking headers honoring Wikipedia bot rules
+# Clean, unified headers following automated API rules
 MASTER_HEADERS = {
     "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: ezragoswami@gmail.com) Educational Research Project",
     "Accept-Encoding": "gzip",
@@ -30,35 +30,52 @@ def encode_url(url: str) -> str:
 @app.get("/proxy")
 async def proxy_endpoint(request: Request, url: str = Query(..., description="The BASE64 ENCODED target URL")):
     try:
-        # Decode the Base64 parameter back to a normal URL string
         padded_url = url + "=" * ((4 - len(url) % 4) % 4)
         decoded_bytes = base64.urlsafe_b64decode(padded_url)
         real_url = decoded_bytes.decode("utf-8")
-        print(f"[PROXY ENGINE] Fetching target website: {real_url}")
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
+
+    # 📺 FIXING THE YOUTUBE VIDEO PROBLEM (Safe Extraction Loop)
+    if "://youtube.com" in real_url or "youtu.be/" in real_url:
+        try:
+            video_id = ""
+            if "watch?v=" in real_url:
+                # Isolate the text piece after watch?v=
+                video_id = real_url.split("watch?v=")[1].split("&")[0]
+            elif "youtu.be/" in real_url:
+                # Isolate the mobile ID piece
+                video_id = real_url.split("youtu.be/")[1].split("?")[0]
+            
+            if video_id:
+                # Force the proxy to fetch Google's embed fullscreen video layout
+                real_url = f"https://youtube.com{video_id}"
+                print(f"[VIDEO ENGINE] Success! Swapped link to embed: {real_url}")
+        except Exception as e:
+            print(f"[VIDEO ENGINE ERROR] Slicing string hit a snag: {e}")
+
+    # Log statement so you can see exactly what your server is connecting to
+    print(f"[PROXY ENGINE] Fetching clean target: {real_url}")
 
     if not real_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid target link protocol.")
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
-            # Download the site files through our master credentials
             response = await client.get(real_url, headers=MASTER_HEADERS, timeout=15.0)
             content_type = response.headers.get("content-type", "")
             
-            # Rewrite paths on matching code content blocks
             if "text/html" in content_type:
                 html_content = response.text
                 
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
-                # Intercept links and resource references natively
+                # Core regex parsing system that successfully maps page links
                 pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 
                 def replace_link(match):
-                    attribute = match.group(1) # 'href' or 'src'
+                    attribute = match.group(1)
                     original_link = match.group(2)
                     
                     if original_link.startswith("/"):
@@ -72,7 +89,6 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 modified_content = re.sub(pattern, replace_link, html_content)
                 return Response(content=modified_content, media_type=content_type)
             
-            # Directly stream back raw image buffers or audio files
             return Response(content=response.content, media_type=content_type)
             
         except httpx.RequestError as exc:
