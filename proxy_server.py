@@ -40,7 +40,7 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
         
         if "url=" in referer:
             try:
-                # Isolate the Base64 hash parameter from your history context safely
+                # Safely isolate the active Base64 hash parameter from the history context string
                 hash_part = referer.split("url=")[1].split("&")[0]
                 padded_hash = hash_part + "=" * ((4 - len(hash_part) % 4) % 4)
                 decoded_parent = base64.urlsafe_b64decode(padded_hash).decode("utf-8")
@@ -49,7 +49,6 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
                 if domain_match:
                     base_site = domain_match.group(1)
                     
-                    # 🛠️ BUG FIX 1: Ensure relative paths always have a single joining slash
                     if not path.startswith("/"):
                         path = "/" + path
                     
@@ -86,17 +85,18 @@ JS_INJECTION = """
         } catch(e) { return url; }
     }
 
-    // Intercept JavaScript fetch() APIs
+    // Intercept JavaScript fetch() APIs safely
     const originalFetch = window.fetch;
     window.fetch = async function(...args) {
-        let resource = args[0];
-        if (typeof resource === 'string' && !resource.includes('/proxy') && !resource.startsWith('data:')) {
-            args[0] = '/proxy?url=' + encodeUrl(resource);
+        if (args && args.length > 0 && typeof args[0] === 'string') {
+            if (!args[0].includes('/proxy') && !args[0].startsWith('data:')) {
+                args[0] = '/proxy?url=' + encodeUrl(args[0]);
+            }
         }
         return originalFetch.apply(this, args);
     };
 
-    // Intercept JavaScript XMLHttpRequest APIs
+    // Intercept JavaScript XMLHttpRequest APIs safely
     const originalOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url, ...args) {
         if (typeof url === 'string' && !url.includes('/proxy') && !url.startsWith('data:')) {
@@ -117,7 +117,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 🛠️ BUG FIX 2: Fixed splitting brackets on YouTube link transformations
+    # 🛠️ FIX: Safe array string splitting index selections for YouTube transformations
     if "://youtube.com" in real_url or "youtu.be/" in real_url:
         extracted_id = ""
         try:
@@ -127,7 +127,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 extracted_id = real_url.split("youtu.be/")[1].split("?")[0]
             
             if extracted_id.strip() != "":
-                real_url = f"https://www.youtube.com/embed/{extracted_id}"
+                real_url = f"https://youtube.com{extracted_id}"
                 print(f"[VIDEO ENGINE] Auto-forwarded video link to Embed Player: {real_url}")
         except Exception as e:
             print(f"[VIDEO ENGINE ERROR] Failed parsing video string: {e}")
