@@ -113,18 +113,22 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 🔄 ADDED YOUTUBE VIDEO LINK REDIRECTION FILTER
-    # Automatically forces regular watch pages into Google's lightweight embed system
+    # 🔄 FIXED YOUTUBE ROUTING FILTER
+    # Only changes the URL if it safely extracts a real video ID sequence
     if "://youtube.com" in real_url or "youtu.be/" in real_url:
-        video_id = ""
-        if "watch?v=" in real_url:
-            video_id = real_url.split("watch?v=")[1].split("&")[0]
-        elif "youtu.be/" in real_url:
-            video_id = real_url.split("youtu.be/")[1].split("?")[0]
+        extracted_id = ""
+        try:
+            if "watch?v=" in real_url:
+                extracted_id = real_url.split("watch?v=")[1].split("&")[0]
+            elif "youtu.be/" in real_url:
+                extracted_id = real_url.split("youtu.be/")[1].split("?")[0]
             
-        if video_id:
-            real_url = f"https://youtube.com{video_id}"
-            print(f"[VIDEO ENGINE] Auto-forwarded video link to Embed Player: {real_url}")
+            # CRITICAL SECURITY CHECK: Only override if the variable is NOT empty
+            if extracted_id.strip() != "":
+                real_url = f"https://youtube.com{extracted_id}"
+                print(f"[VIDEO ENGINE] Auto-forwarded video link to Embed Player: {real_url}")
+        except Exception as e:
+            print(f"[VIDEO ENGINE ERROR] Failed parsing video string: {e}")
 
     print(f"[PROXY ENGINE] Fetching target: {real_url}")
 
@@ -133,7 +137,6 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
-            # All sites now pass through our unified master tracking bot header format
             response = await client.get(real_url, headers=MASTER_HEADERS, timeout=15.0)
             content_type = response.headers.get("content-type", "")
             
@@ -143,23 +146,19 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
-                # Inject our custom JS script right inside the page header
                 html_content = re.sub(r"<head>", f"<head>{JS_INJECTION}", html_content, flags=re.IGNORECASE)
 
-                # 🔄 LINK REWRITING ENGINE: Transforms standard href/src links into web proxy format
                 pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 
                 def replace_link(match):
-                    attribute = match.group(1) # 'href' or 'src'
+                    attribute = match.group(1)
                     original_link = match.group(2)
                     
-                    # Convert internal relative links (like /wiki/Science) into absolute paths
                     if original_link.startswith("/"):
                         full_link = base_domain + original_link
                     else:
                         full_link = original_link
                         
-                    # Turn the complete web path link into our encrypted proxy parameter layout
                     encrypted_link = encode_url(full_link)
                     return f'{attribute}="/proxy?url={encrypted_link}"'
 
