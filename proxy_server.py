@@ -16,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Unified standard tracking headers for all websites (including Wikipedia and YouTube)
+# Unified standard tracking headers for all websites
 MASTER_HEADERS = {
     "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: ezragoswami@gmail.com) Educational Research Project",
     "Accept-Encoding": "gzip",
@@ -28,7 +28,7 @@ def encode_url(url: str) -> str:
     base64_bytes = base64.urlsafe_b64encode(url_bytes)
     return base64_bytes.decode("utf-8").replace("=", "")
 
-# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR (Catches relative browser requests)
+# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR
 class GlobalProxyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -40,7 +40,7 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
         
         if "url=" in referer:
             try:
-                # Isolate the Base64 hash parameter from your history context
+                # Isolate the Base64 hash parameter from your history context safely
                 hash_part = referer.split("url=")[1].split("&")[0]
                 padded_hash = hash_part + "=" * ((4 - len(hash_part) % 4) % 4)
                 decoded_parent = base64.urlsafe_b64decode(padded_hash).decode("utf-8")
@@ -48,6 +48,10 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
                 domain_match = re.match(r"(https?://[^/]+)", decoded_parent)
                 if domain_match:
                     base_site = domain_match.group(1)
+                    
+                    # 🛠️ BUG FIX 1: Ensure relative paths always have a single joining slash
+                    if not path.startswith("/"):
+                        path = "/" + path
                     
                     raw_query = request.url.query
                     full_target_url = f"{base_site}{path}"
@@ -113,8 +117,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 🔄 FIXED YOUTUBE ROUTING FILTER
-    # Only changes the URL if it safely extracts a real video ID sequence
+    # 🛠️ BUG FIX 2: Fixed splitting brackets on YouTube link transformations
     if "://youtube.com" in real_url or "youtu.be/" in real_url:
         extracted_id = ""
         try:
@@ -123,9 +126,8 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
             elif "youtu.be/" in real_url:
                 extracted_id = real_url.split("youtu.be/")[1].split("?")[0]
             
-            # CRITICAL SECURITY CHECK: Only override if the variable is NOT empty
             if extracted_id.strip() != "":
-                real_url = f"https://youtube.com{extracted_id}"
+                real_url = f"https://www.youtube.com/embed/{extracted_id}"
                 print(f"[VIDEO ENGINE] Auto-forwarded video link to Embed Player: {real_url}")
         except Exception as e:
             print(f"[VIDEO ENGINE ERROR] Failed parsing video string: {e}")
@@ -146,8 +148,10 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
+                # Inject our custom JS script right inside the page header
                 html_content = re.sub(r"<head>", f"<head>{JS_INJECTION}", html_content, flags=re.IGNORECASE)
 
+                # LINK REWRITING ENGINE
                 pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 
                 def replace_link(match):
