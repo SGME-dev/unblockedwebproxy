@@ -22,8 +22,7 @@ MASTER_HEADERS = {
     "Accept": "*/*",
 }
 
-# 🚨 DEFINING YOUR EXACT DEDICATED DOMAIN
-MY_APP_DOMAIN = "https://unblocked-web-proxy.onrender.com"
+MY_APP_DOMAIN = "https://onrender.com"
 
 def encode_url(url: str) -> str:
     url_bytes = url.encode("utf-8")
@@ -35,26 +34,22 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
-        # Permit native server endpoints to bypass tracking filters
         if path in ["/proxy", "/docs", "/openapi.json"] or path.startswith("/static"):
             return await call_next(request)
             
         referer = request.headers.get("referer", "")
         
-        # Catch unexpected background asset requests fired by active pages
         if "url=" in referer:
             try:
-                # Isolate the Base64 hash parameter from the tracking string safely
+                # Isolate the Base64 hash parameter from history context safely
                 hash_part = referer.split("url=")[1].split("&")[0]
                 padded_hash = hash_part + "=" * ((4 - len(hash_part) % 4) % 4)
                 decoded_parent = base64.urlsafe_b64decode(padded_hash).decode("utf-8")
                 
-                # Extract the base target root server domain (e.g., https://youtube.com)
                 domain_match = re.match(r"(https?://[^/]+)", decoded_parent)
                 if domain_match:
                     base_site = domain_match.group(1)
                     
-                    # 🛠️ BUG FIX: Cleanly build the absolute link pathway
                     if not path.startswith("/"):
                         path = "/" + path
                         
@@ -65,7 +60,6 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
                         
                     print(f"[MIDDLEWARE CATCH] Fixing relative asset to target: {full_target_url}")
                     
-                    # 🛠️ CRITICAL FIX: Redirect directly using your exact unblocked subdomain path!
                     encrypted_target = encode_url(full_target_url)
                     return Response(
                         status_code=307,
@@ -78,7 +72,8 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(GlobalProxyMiddleware)
 
-@app.get("/proxy")
+# 🛠️ ACCEPT BOTH GET AND POST REQUEST METHODS (Fixes the 405 error!)
+@app.api_route("/proxy", methods=["GET", "POST"])
 async def proxy_endpoint(request: Request, url: str = Query(..., description="The BASE64 ENCODED target URL")):
     try:
         padded_url = url + "=" * ((4 - len(url) % 4) % 4)
@@ -87,8 +82,8 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 📺 CLEAN YOUTUBE VIDEO CONVERSION FILTER
-    if "://youtube.com" in real_url or "youtu.be/" in real_url:
+    # 📺 YOUTUBE VIDEO CONVERSION FILTER
+    if "youtube.com/watch?v=" in real_url or "youtu.be/" in real_url:
         try:
             video_id = ""
             if "watch?v=" in real_url:
@@ -97,7 +92,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 video_id = real_url.split("youtu.be/")[1].split("?")[0]
             
             if video_id.strip() != "":
-                real_url = f"https://youtube.com/embed/{video_id}"
+                real_url = f"https://youtube.com{video_id}"
                 print(f"[VIDEO ENGINE] Auto-forwarded video link to Embed Player: {real_url}")
         except Exception as e:
             print(f"[VIDEO ENGINE ERROR] Failed parsing video string: {e}")
@@ -116,13 +111,13 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
             )
             content_type = response.headers.get("content-type", "")
             
+            # 🛠️ CRITICAL FIX: Only rewrite HTML links. Leave scripts (.js) untouched to avoid syntax errors!
             if "text/html" in content_type:
                 html_content = response.text
                 
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
-                # Intercept hyperlinks and assets inside HTML code templates
                 pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 
                 def replace_link(match):
@@ -135,7 +130,6 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                         full_link = original_link
                         
                     encrypted_link = encode_url(full_link)
-                    # Force all internal links to prefix with your exact public domain
                     return f'{attribute}="{MY_APP_DOMAIN}/proxy?url={encrypted_link}"'
 
                 modified_content = re.sub(pattern, replace_link, html_content)
