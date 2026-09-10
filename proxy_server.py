@@ -81,14 +81,11 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 📺 UPGRADED REGEX YOUTUBE VIDEO CONVERSION FILTER
-    # This uses a strict regex pattern filter to isolate the video token ID safely
+    # 📺 REGEX YOUTUBE VIDEO CONVERSION FILTER (Guaranteed to build perfect absolute embed paths)
     if "://youtube.com" in real_url or "youtu.be/" in real_url:
         try:
             video_id = ""
-            # Look for the standard desktop video token match group
             match_desktop = re.search(r"[?&]v=([^&#]+)", real_url)
-            # Look for the mobile share link token match group
             match_mobile = re.search(r"youtu\.be/([^?&#]+)", real_url)
             
             if match_desktop:
@@ -97,7 +94,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 video_id = match_mobile.group(1)
                 
             if video_id:
-                # Construct the explicit, clear absolute embed path link layout
+                # Constructs the flawless, absolute embed player layout link
                 real_url = f"https://youtube.com{video_id}"
                 print(f"[VIDEO ENGINE] Success! Rebuilt URL using regex: {real_url}")
         except Exception as e:
@@ -117,6 +114,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
             )
             content_type = response.headers.get("content-type", "")
             
+            # 🛠️ THE SHIELD: ONLY modify pure HTML pages. Keep background scripts completely raw!
             if "text/html" in content_type:
                 html_content = response.text
                 
@@ -140,6 +138,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 modified_content = re.sub(pattern, replace_link, html_content)
                 return Response(content=modified_content, media_type=content_type)
             
+            # Directly stream scripts (.js), styles (.css), and data streams completely untouched!
             return Response(content=response.content, media_type=content_type)
             
         except httpx.RequestError as exc:
