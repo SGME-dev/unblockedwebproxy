@@ -16,20 +16,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Unified standard tracking headers honoring Wikipedia and YouTube bot layout policies
 MASTER_HEADERS = {
     "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: ezragoswami@gmail.com) Educational Research Project",
     "Accept-Encoding": "gzip",
     "Accept": "*/*",
 }
 
-MY_APP_DOMAIN = "https://onrender.com"
+MY_APP_DOMAIN = "https://unblocked-web-proxy.onrender.com"
 
 def encode_url(url: str) -> str:
     url_bytes = url.encode("utf-8")
     base64_bytes = base64.urlsafe_b64encode(url_bytes)
     return base64_bytes.decode("utf-8").replace("=", "")
 
-# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR
+# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR (Catches relative scripts/XHR pipes)
 class GlobalProxyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -72,7 +73,7 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(GlobalProxyMiddleware)
 
-# 🛠️ ACCEPT BOTH GET AND POST REQUEST METHODS (Fixes the 405 error!)
+# 🛠️ CHOOSE ROUTING METHODS DYNAMICALLY (Fixes the 405 Method Not Allowed error)
 @app.api_route("/proxy", methods=["GET", "POST"])
 async def proxy_endpoint(request: Request, url: str = Query(..., description="The BASE64 ENCODED target URL")):
     try:
@@ -82,20 +83,22 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 📺 YOUTUBE VIDEO CONVERSION FILTER
-    if "youtube.com/watch?v=" in real_url or "youtu.be/" in real_url:
+    # 📺 FIXED YOUTUBE VIDEO CONVERSION FILTER (With strict array index splitting)
+    if "://youtube.com" in real_url or "youtu.be/" in real_url:
         try:
             video_id = ""
             if "watch?v=" in real_url:
+                # Isolate everything after watch?v=, then take the first parameter item string segment
                 video_id = real_url.split("watch?v=")[1].split("&")[0]
             elif "youtu.be/" in real_url:
+                # Isolate the mobile share identifier snippet cleanly
                 video_id = real_url.split("youtu.be/")[1].split("?")[0]
             
             if video_id.strip() != "":
                 real_url = f"https://youtube.com{video_id}"
-                print(f"[VIDEO ENGINE] Auto-forwarded video link to Embed Player: {real_url}")
+                print(f"[VIDEO ENGINE] Successfully converted video link to safe embed layout: {real_url}")
         except Exception as e:
-            print(f"[VIDEO ENGINE ERROR] Failed parsing video string: {e}")
+            print(f"[VIDEO ENGINE ERROR] Slicing string hit a snag: {e}")
 
     print(f"[PROXY ENGINE] Fetching target: {real_url}")
 
@@ -111,7 +114,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
             )
             content_type = response.headers.get("content-type", "")
             
-            # 🛠️ CRITICAL FIX: Only rewrite HTML links. Leave scripts (.js) untouched to avoid syntax errors!
+            # Only rewrite page text structures. Leave streaming binary or javascript data untouched.
             if "text/html" in content_type:
                 html_content = response.text
                 
