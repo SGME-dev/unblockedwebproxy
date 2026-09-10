@@ -16,21 +16,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Unified standard tracking headers honoring Wikipedia and YouTube bot layout policies
 MASTER_HEADERS = {
     "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: ezragoswami@gmail.com) Educational Research Project",
     "Accept-Encoding": "gzip",
     "Accept": "*/*",
 }
 
-MY_APP_DOMAIN = "https://unblocked-web-proxy.onrender.com"
+MY_APP_DOMAIN = "https://onrender.com"
 
 def encode_url(url: str) -> str:
     url_bytes = url.encode("utf-8")
     base64_bytes = base64.urlsafe_b64encode(url_bytes)
     return base64_bytes.decode("utf-8").replace("=", "")
 
-# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR (Catches relative scripts/XHR pipes)
+# 🚀 THE MASTER GLOBAL ROUTING INTERCEPTOR
 class GlobalProxyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -73,7 +72,6 @@ class GlobalProxyMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(GlobalProxyMiddleware)
 
-# 🛠️ CHOOSE ROUTING METHODS DYNAMICALLY (Fixes the 405 Method Not Allowed error)
 @app.api_route("/proxy", methods=["GET", "POST"])
 async def proxy_endpoint(request: Request, url: str = Query(..., description="The BASE64 ENCODED target URL")):
     try:
@@ -83,22 +81,27 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 📺 FIXED YOUTUBE VIDEO CONVERSION FILTER (With strict array index splitting)
+    # 📺 UPGRADED REGEX YOUTUBE VIDEO CONVERSION FILTER
+    # This uses a strict regex pattern filter to isolate the video token ID safely
     if "://youtube.com" in real_url or "youtu.be/" in real_url:
         try:
             video_id = ""
-            if "watch?v=" in real_url:
-                # Isolate everything after watch?v=, then take the first parameter item string segment
-                video_id = real_url.split("watch?v=")[1].split("&")[0]
-            elif "youtu.be/" in real_url:
-                # Isolate the mobile share identifier snippet cleanly
-                video_id = real_url.split("youtu.be/")[1].split("?")[0]
+            # Look for the standard desktop video token match group
+            match_desktop = re.search(r"[?&]v=([^&#]+)", real_url)
+            # Look for the mobile share link token match group
+            match_mobile = re.search(r"youtu\.be/([^?&#]+)", real_url)
             
-            if video_id.strip() != "":
+            if match_desktop:
+                video_id = match_desktop.group(1)
+            elif match_mobile:
+                video_id = match_mobile.group(1)
+                
+            if video_id:
+                # Construct the explicit, clear absolute embed path link layout
                 real_url = f"https://youtube.com{video_id}"
-                print(f"[VIDEO ENGINE] Successfully converted video link to safe embed layout: {real_url}")
+                print(f"[VIDEO ENGINE] Success! Rebuilt URL using regex: {real_url}")
         except Exception as e:
-            print(f"[VIDEO ENGINE ERROR] Slicing string hit a snag: {e}")
+            print(f"[VIDEO ENGINE ERROR] Regex extraction failed: {e}")
 
     print(f"[PROXY ENGINE] Fetching target: {real_url}")
 
@@ -114,7 +117,6 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
             )
             content_type = response.headers.get("content-type", "")
             
-            # Only rewrite page text structures. Leave streaming binary or javascript data untouched.
             if "text/html" in content_type:
                 html_content = response.text
                 
