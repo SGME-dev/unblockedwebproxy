@@ -15,7 +15,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Clean, unified headers following automated API rules
 MASTER_HEADERS = {
     "User-Agent": "EducationalSchoolProxyBot/1.0 (contact: ezragoswami@gmail.com) Educational Research Project",
     "Accept-Encoding": "gzip",
@@ -29,6 +28,12 @@ def encode_url(url: str) -> str:
 
 @app.get("/proxy")
 async def proxy_endpoint(request: Request, url: str = Query(..., description="The BASE64 ENCODED target URL")):
+    # 1. DYNAMICALLY DETECT YOUR ACTIVE RENDER DOMAIN
+    # This ensures your rewritten links always target your app directly rather than the proxy host!
+    host_header = request.headers.get("host", "://onrender.com")
+    scheme = request.url.scheme
+    my_base_proxy_url = f"{scheme}://{host_header}"
+
     try:
         padded_url = url + "=" * ((4 - len(url) % 4) % 4)
         decoded_bytes = base64.urlsafe_b64decode(padded_url)
@@ -36,26 +41,22 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 📺 FIXING THE YOUTUBE VIDEO PROBLEM (Safe Extraction Loop)
+    # 📺 FIXED YOUTUBE VIDEO CONVERSION BLOCK
     if "://youtube.com" in real_url or "youtu.be/" in real_url:
         try:
             video_id = ""
             if "watch?v=" in real_url:
-                # Isolate the text piece after watch?v=
                 video_id = real_url.split("watch?v=")[1].split("&")[0]
             elif "youtu.be/" in real_url:
-                # Isolate the mobile ID piece
                 video_id = real_url.split("youtu.be/")[1].split("?")[0]
             
             if video_id:
-                # Force the proxy to fetch Google's embed fullscreen video layout
                 real_url = f"https://youtube.com{video_id}"
-                print(f"[VIDEO ENGINE] Success! Swapped link to embed: {real_url}")
+                print(f"[VIDEO ENGINE] Successfully converted link to embed layout: {real_url}")
         except Exception as e:
-            print(f"[VIDEO ENGINE ERROR] Slicing string hit a snag: {e}")
+            print(f"[VIDEO ENGINE ERROR] Slicing text layout hit an error: {e}")
 
-    # Log statement so you can see exactly what your server is connecting to
-    print(f"[PROXY ENGINE] Fetching clean target: {real_url}")
+    print(f"[PROXY ENGINE] Contacting destination: {real_url}")
 
     if not real_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid target link protocol.")
@@ -71,7 +72,7 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 domain_match = re.match(r"(https?://[^/]+)", real_url)
                 base_domain = domain_match.group(1) if domain_match else real_url
 
-                # Core regex parsing system that successfully maps page links
+                # Intercept hyperlinks and source assets cleanly
                 pattern = r'(href|src)=["\'](https?://[^"\']+|/[^"\']+)["\']'
                 
                 def replace_link(match):
@@ -84,7 +85,9 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                         full_link = original_link
                         
                     encrypted_link = encode_url(full_link)
-                    return f'{attribute}="/proxy?url={encrypted_link}"'
+                    
+                    # 🛠️ THE CRITICAL BUG FIX: Always prefix the link with your absolute cloud URL path
+                    return f'{attribute}="{my_base_proxy_url}/proxy?url={encrypted_link}"'
 
                 modified_content = re.sub(pattern, replace_link, html_content)
                 return Response(content=modified_content, media_type=content_type)
