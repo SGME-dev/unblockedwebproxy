@@ -81,24 +81,20 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to decode hash structure.")
 
-    # 📺 REGEX YOUTUBE VIDEO CONVERSION FILTER (Guaranteed to build perfect absolute embed paths)
-    if "://youtube.com" in real_url or "youtu.be/" in real_url:
+    # 📺 MASTER REGEX SUB OVERRIDE (Fixes the missing slash and domain fusion bug permanently)
+    if "youtube.com" in real_url or "youtu.be" in real_url:
         try:
-            video_id = ""
-            match_desktop = re.search(r"[?&]v=([^&#]+)", real_url)
-            match_mobile = re.search(r"youtu\.be/([^?&#]+)", real_url)
+            # 1. Catch standard desktop links: https://youtube.com -> https://youtube.com
+            if "watch?v=" in real_url:
+                real_url = re.sub(r"https?://(www\.)?youtube\.com/watch\?v=([^&#]+).*", r"https://youtube.com\2", real_url)
             
-            if match_desktop:
-                video_id = match_desktop.group(1)
-            elif match_mobile:
-                video_id = match_mobile.group(1)
+            # 2. Catch mobile share links: https://youtu.be -> https://youtube.com
+            elif "youtu.be/" in real_url:
+                real_url = re.sub(r"https?://youtu\.be/([^?&#]+).*", r"https://youtube.com\1", real_url)
                 
-            if video_id:
-                # Constructs the flawless, absolute embed player layout link
-                real_url = f"https://youtube.com{video_id}"
-                print(f"[VIDEO ENGINE] Success! Rebuilt URL using regex: {real_url}")
+            print(f"[VIDEO ENGINE] Successfully rebuilt URL destination: {real_url}")
         except Exception as e:
-            print(f"[VIDEO ENGINE ERROR] Regex extraction failed: {e}")
+            print(f"[VIDEO ENGINE ERROR] Sub match routing failed: {e}")
 
     print(f"[PROXY ENGINE] Fetching target: {real_url}")
 
@@ -114,7 +110,6 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
             )
             content_type = response.headers.get("content-type", "")
             
-            # 🛠️ THE SHIELD: ONLY modify pure HTML pages. Keep background scripts completely raw!
             if "text/html" in content_type:
                 html_content = response.text
                 
@@ -138,7 +133,6 @@ async def proxy_endpoint(request: Request, url: str = Query(..., description="Th
                 modified_content = re.sub(pattern, replace_link, html_content)
                 return Response(content=modified_content, media_type=content_type)
             
-            # Directly stream scripts (.js), styles (.css), and data streams completely untouched!
             return Response(content=response.content, media_type=content_type)
             
         except httpx.RequestError as exc:
