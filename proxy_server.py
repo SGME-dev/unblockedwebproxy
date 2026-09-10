@@ -22,7 +22,7 @@ MASTER_HEADERS = {
     "Accept": "*/*",
 }
 
-MY_APP_DOMAIN = "https://onrender.com"
+MY_APP_DOMAIN = "https://unblocked-web-proxy.onrender.com"
 
 def encode_url(url: str) -> str:
     url_bytes = url.encode("utf-8")
